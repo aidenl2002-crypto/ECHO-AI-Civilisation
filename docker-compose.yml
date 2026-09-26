@@ -1,0 +1,45 @@
+# Postgres is OPTIONAL. Default is SQLite via DB_PATH.
+# Start only postgres:  docker compose --profile pg up -d postgres
+# Start everything:     docker compose --profile pg up --build
+name: project-echo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: echo
+      POSTGRES_PASSWORD: echo
+      POSTGRES_DB: echo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    profiles: ["pg"]
+
+  api:
+    build: ./apps/api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: 4000
+      # DATABASE_URL: postgres://echo:echo@postgres:5432/echo
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - postgres
+    profiles: ["full"]
+
+  web:
+    build: ./apps/web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    profiles: ["full"]
+
+volumes:
+  pgdata:

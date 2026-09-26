@@ -1,0 +1,10 @@
+[
+  { "role": "reflex", "model": "opencode/space-bunny-free", "agent": "echo-reflex", "timeoutMs": 30000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "social", "model": "opencode/space-bunny-free", "agent": "echo-social", "timeoutMs": 60000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "planning", "model": "opencode/space-bunny-free", "agent": "echo-planner", "timeoutMs": 90000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "business", "model": "opencode/space-bunny-free", "agent": "echo-business", "timeoutMs": 60000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "government", "model": "opencode/space-bunny-free", "agent": "echo-politics", "timeoutMs": 60000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "dialogue", "model": "opencode/space-bunny-free", "agent": "echo-dialogue", "timeoutMs": 60000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "narrator", "model": "opencode/space-bunny-free", "agent": "echo-narrator", "timeoutMs": 60000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true },
+  { "role": "historian", "model": "opencode/space-bunny-free", "agent": "echo-historian", "timeoutMs": 60000, "fallbackModels": ["opencode/nemotron-3.5-lightning-free"], "enabled": true }
+]
