@@ -49,6 +49,7 @@ export function TopBar() {
         <button title="Step one tick" onClick={e.step}><Icon name="step" size={13} /></button>
       </div>
       <button title="Save city" onClick={e.save}><Icon name="save" size={14} /></button>
+      <button className="ghost danger" title="Save & exit (saves current world, then closes this tab)" onClick={async () => { await e.save(); window.close(); }}><Icon name="power" size={14} /></button>
       <button className="ghost" title="AI Brain" onClick={() => e.setView('brain')}><Icon name="gear" size={16} /></button>
       <input className="owner-key" value={godKey} onChange={(ev) => { setGodKey(ev.target.value); setOwnerToken(ev.target.value); }}
         placeholder="Owner key" type="password" title="Owner key (stored locally)" />
