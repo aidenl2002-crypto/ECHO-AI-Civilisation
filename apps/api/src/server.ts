@@ -12,6 +12,7 @@ import { ensureMind, retrieveMemories, attentionScore, attentionClass, lodFor, g
 import type { ModelRole } from "@echo/ai";
 import { totalMoney } from "@echo/simulation-core";
 import { adminAuth, registerAdminRoutes, requirePerm } from "./admin.js";
+import type { Building } from "@echo/shared";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const app = express();
@@ -25,10 +26,10 @@ setInterval(() => { if (!engine.paused) { for (let i = 0; i < engine.speed * tic
 app.get("/api/state", (_req, res) => {
   const snap = engine.snapshot();
   res.json({
-    clock: { year: engine.clock.year, day: engine.clock.day, hour: engine.clock.hour, season: engine.clock.season, totalHours: engine.clock.tick / 12 },
+    clock: { year: engine.clock.year, day: engine.clock.day, hour: engine.clock.hour, season: engine.clock.season, totalHours: engine.clock.tick / 12, tick: engine.clock.tick },
     speed: engine.speed, paused: engine.paused,
     counts: { population: snap.population, events: snap.events, buildings: Object.keys(engine.state.buildings).length },
-    cityName: engine.state.cityName, seed: String(engine.state.seed),
+    cityName: engine.state.cityName, seed: String(engine.state.seed), worldKey: `${engine.state.seed}:${engine.state.cityName}:${engine.state.layout?.version ?? 1}:${Object.keys(engine.state.buildings).length}`,
     snapshot: snap, government: engine.state.government, metrics: engine.state.metricsHistory.slice(-30),
   });
 });
@@ -39,16 +40,18 @@ app.get("/api/citizens", (_req, res) => {
     wealth: c.financial.cash + c.financial.bank, x: c.position.x, y: c.position.y,
     health: c.needs.health, mood: Math.round(c.needs.happiness),
     alive: c.alive, activity: c.currentActivity,
+    energy: c.needs.energy, hunger: c.needs.hunger, stress: c.emotions.stress,
+    homeId: c.homeId, workBuildingId: c.workBuildingId, destinationBuildingId: c.destinationBuildingId,
   })));
 });
 app.get("/api/citizens/:id", (req, res) => {
   const c = engine.state.citizens[req.params.id];
   if (!c) { res.status(404).json({ error: "not found" }); return; }
   const rels = Object.values(engine.state.relationships ?? {}).filter((r: { aId: string; bId: string }) => r.aId === c.id || r.bId === c.id).slice(0, 10)
-    .map((r: { aId: string; bId: string; trust?: number }) => {
+    .map((r) => {
       const oid = r.aId === c.id ? r.bId : r.aId;
       const o = engine.state.citizens[oid];
-      return { id: oid, name: o ? `${o.firstName} ${o.lastName}` : oid, score: Math.round(((r.trust ?? 0.5) as number) * 100) };
+      return { id: oid, name: o ? `${o.firstName} ${o.lastName}` : oid, score: Math.round((r.trust ?? 0.5) * 100), trust: r.trust, affection: r.affection, type: r.type };
     });
   const mems = engine.state.memories.filter((m) => m.citizenId === c.id).slice(-8).reverse()
     .map((m) => ({ text: m.text, day: m.day }));
@@ -60,6 +63,9 @@ app.get("/api/citizens/:id", (req, res) => {
     job: c.jobId ? engine.state.jobs[c.jobId]?.title ?? "Working" : "Unemployed",
     wealth: c.financial.cash + c.financial.bank, x: c.position.x, y: c.position.y,
     health: c.needs.health, mood: Math.round(c.needs.happiness),
+    alive: c.alive, deadDay: c.tickDied == null ? undefined : Math.floor(c.tickDied / 288) + 1,
+    energy: c.needs.energy, hunger: c.needs.hunger, stress: c.emotions.stress,
+    homeId: c.homeId, workBuildingId: c.workBuildingId, destinationBuildingId: c.destinationBuildingId,
     home: c.homeId ? engine.state.buildings[c.homeId]?.name ?? c.homeId : "homeless",
     personality: c.psychology, skills: c.skills, relationships: rels, memories: mems,
     activity: c.currentActivity, goals, events: evs,
@@ -69,11 +75,36 @@ app.get("/api/citizens/:id", (req, res) => {
     raw: c,
   });
 });
-app.get("/api/buildings", (_req, res) => {
-  res.json(Object.values(engine.state.buildings).map((b) => ({
+function buildingDto(b: Building) {
+  const hour = engine.clock.hour;
+  const { open, close } = b.openingHours;
+  return {
     id: b.id, name: b.name, type: b.type, x: b.position.x, y: b.position.y,
     ownerId: b.ownerId, funds: b.economic.funds, capacity: b.capacity,
-  })));
+    districtId: b.districtId, districtName: engine.state.layout?.districts.find((d) => d.id === b.districtId)?.name,
+    address: b.address, variant: b.variant, footprint: b.footprint, height: b.height, rotation: b.rotation,
+    entrance: b.entrance, propertyValue: b.propertyValue, rent: b.rent, condition: b.condition, desirability: b.desirability,
+    workerCount: b.workers.length, residentCount: Object.values(engine.state.citizens).filter((c) => c.alive && c.homeId === b.id).length,
+    open: open === close || (close > open ? hour >= open && hour < close : hour >= open || hour < close),
+  };
+}
+app.get("/api/world/layout", (_req, res) => { res.json(engine.state.layout ?? null); });
+app.get("/api/buildings", (_req, res) => { res.json(Object.values(engine.state.buildings).map(buildingDto)); });
+app.get("/api/buildings/:id", (req, res) => {
+  const b = engine.state.buildings[req.params.id];
+  if (!b) { res.status(404).json({ error: "Building not found" }); return; }
+  const citizens = Object.values(engine.state.citizens).filter((c) => c.alive);
+  const named = (c: (typeof citizens)[number]) => ({ id: c.id, name: `${c.firstName} ${c.lastName}` });
+  const owner = b.ownerId ? engine.state.citizens[b.ownerId] : null;
+  res.json({ ...buildingDto(b), ownerName: owner ? `${owner.firstName} ${owner.lastName}` : null,
+    residents: citizens.filter((c) => c.homeId === b.id).map(named),
+    workers: citizens.filter((c) => c.workBuildingId === b.id).map((c) => ({ ...named(c), job: c.jobId ? engine.state.jobs[c.jobId]?.title ?? 'Worker' : 'Worker' })),
+    visitors: citizens.filter((c) => Math.hypot(c.position.x - b.position.x, c.position.y - b.position.y) < 16).map((c) => ({ ...named(c), activity: c.currentActivity })),
+    inventory: b.inventory, openingHours: b.openingHours,
+    revenueToday: b.economic.metricDay === engine.clock.day ? b.economic.revenueToday ?? 0 : 0,
+    customersToday: b.economic.metricDay === engine.clock.day ? b.economic.customersToday ?? 0 : 0,
+    events: engine.state.events.filter((ev) => ev.buildingId === b.id).slice(-12).reverse().map((ev) => ({ id: ev.id, day: ev.day, text: ev.summary })),
+  });
 });
 app.get("/api/events", (req, res) => {
   const limit = Math.min(500, Number(req.query.limit ?? 100));
@@ -101,7 +132,7 @@ app.get("/api/echonet", (_req, res) => {
     text: p.text, day: p.day, likes: p.likes, replyToId: p.replyToId,
   })));
 });
-app.get("/api/ai/status", (_req, res) => { res.json(ai.status()); });
+app.get("/api/ai/status", (_req, res) => { res.json({ ...brainProvider.status(), queue: brainProvider.status().queued }); });
 app.get("/api/timeline", (_req, res) => {
   res.json(engine.state.events.map((e) => ({ id: e.id, day: e.day, tick: e.tick, type: e.type, summary: e.summary })).slice(-500));
 });
@@ -129,7 +160,7 @@ app.post("/api/new", (req, res) => {
 import { createWorld, SimClock, Rng, mulberry32 } from "@echo/simulation-core";
 function await_import_new(seed?: number | string, cityName?: string, citizens?: number): typeof engine.state {
   const s = hashSeed(seed ?? Math.floor(Math.random() * 1e9));
-  return createWorld(s, String(cityName ?? "Echo City"), Math.min(200, Math.max(5, Number(citizens ?? 40))));
+  return createWorld(s, String(cityName ?? "Echo City"), Math.min(1000, Math.max(5, Number(citizens ?? 120))));
 }
 function resetEngineTo(state: typeof engine.state): void {
   engine.state = state;

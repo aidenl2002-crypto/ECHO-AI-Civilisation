@@ -196,7 +196,7 @@ export function adminSpawn(state: WorldState, tick: number, opts: Partial<Citize
   const base: Citizen = {
     id, firstName: opts.firstName ?? "Godchild", lastName: opts.lastName ?? "Spawn",
     sex: (opts.sex as Citizen["sex"]) ?? "M", age: opts.age ?? 25, alive: true,
-    position: opts.position ?? { x: 500, y: 500 },
+    position: opts.position ?? { ...(state.buildings[opts.homeId ?? 'b_home0']?.position ?? { x: (state.layout?.width ?? 1000) / 2, y: (state.layout?.height ?? 1000) / 2 }) },
     homeId: opts.homeId ?? "b_home0", workBuildingId: null, jobId: null,
     destinationBuildingId: null, currentActivity: "idle",
     physical: opts.physical ?? { height: 178, health: 85 },
@@ -244,7 +244,7 @@ export function verifyWorld(state: WorldState): Array<{ check: string; ok: boole
   out.push({ check: "dead-cannot-act", ok: deadActing.length === 0, detail: deadActing.slice(0, 5).join(", ") || "ok" });
   const badRel = Object.entries(state.relationships).filter(([k, r]) => !state.citizens[r.aId] || !state.citizens[r.bId] || k !== relKey(r.aId, r.bId)).map(([k]) => k);
   out.push({ check: "relationships-valid", ok: badRel.length === 0, detail: badRel.slice(0, 5).join(", ") || "ok" });
-  const oob = Object.values(state.citizens).filter((c) => c.position.x < 0 || c.position.x > 1000 || c.position.y < 0 || c.position.y > 1000).map((c) => c.id);
+  const oob = Object.values(state.citizens).filter((c) => !Number.isFinite(c.position.x) || !Number.isFinite(c.position.y) || c.position.x < 0 || c.position.x > (state.layout?.width ?? 1000) || c.position.y < 0 || c.position.y > (state.layout?.height ?? 1000)).map((c) => c.id);
   out.push({ check: "positions-in-bounds", ok: oob.length === 0, detail: oob.slice(0, 5).join(", ") || "ok" });
   let mono = true; let last = -1;
   for (const e of state.events) { if (e.tick < last) { mono = false; break; } last = e.tick; }
@@ -485,7 +485,11 @@ export function registerAdminRoutes(app: Express, deps: AdminDeps): void {
         case "teleport": {
           if (typeof b.buildingId === "string" && st.buildings[b.buildingId as string]) {
             c!.position = { ...st.buildings[b.buildingId as string].position };
-          } else { c!.position = { x: Math.max(0, Math.min(1000, Number(b.x ?? 500))), y: Math.max(0, Math.min(1000, Number(b.y ?? 500))) }; }
+          } else {
+            const x = Number(b.x ?? c!.position.x), y = Number(b.y ?? c!.position.y);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) { res.status(400).json({error:'Coordinates must be finite numbers'}); return; }
+            c!.position = { x: Math.max(0, Math.min(st.layout?.width ?? 1000, x)), y: Math.max(0, Math.min(st.layout?.height ?? 1000, y)) };
+          }
           c!.destinationBuildingId = null; return done();
         }
         case "job": {

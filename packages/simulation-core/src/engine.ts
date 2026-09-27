@@ -21,7 +21,7 @@ export class SimulationEngine {
   rng: Rng;
   private rngFn: () => number;
 
-  constructor(seed = 1337, cityName = "Echo City", citizens = 40) {
+  constructor(seed = 1337, cityName = "Echo City", citizens = 120) {
     this.state = createWorld(seed, cityName, citizens);
     this.clock = new SimClock(0);
     this.rng = new Rng(seed ^ 0x9e3779b9);

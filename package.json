@@ -11,7 +11,7 @@
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace packages/shared && npm run build --workspace packages/simulation-core && npm run build --workspace packages/ai && npm run build --workspace apps/api && npm run build --workspace apps/web",
-    "test": "node --test packages/simulation-core/src/*.test.*js apps/api/tests/*.test.*js 2>&1 || node --test packages/simulation-core/dist/**/*.test.js apps/api/tests/**/*.js 2>&1 || echo \"run npm run build first\"",
+    "test": "node --test packages/simulation-core/dist/invariants.test.js apps/api/tests/*.test.mjs",
     "sim:headless": "npm run headless --workspace apps/api",
     "migrate": "node apps/api/dist/db.js --migrate",
     "seed": "node apps/api/dist/seed.js"

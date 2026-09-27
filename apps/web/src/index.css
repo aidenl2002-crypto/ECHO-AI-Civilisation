@@ -206,6 +206,9 @@ button:focus-visible, [role="button"]:focus-visible { outline: 3px solid #258b80
 .post-reply b { color: var(--txt); }
 .post-reply .faint { font-size: 10px; }
 .post-reply div div { margin-top: 3px; }
+.building-person { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; margin-bottom: 5px; padding: 7px 9px; font-size: 12px; }
+.building-person span { color: var(--dim); font-size: 10px; font-weight: 400; }
+.building-inspector > .chip { margin-top: 8px; text-transform: capitalize; }
 .post .pa button { background: none; border: none; color: var(--faint); padding: 2px 4px; font-size: 11.5px; display: flex; gap: 4px; align-items: center; box-shadow: none; }
 .post .pa button:hover { color: var(--pink); }
 .ad { border: 1px dashed #ddb879; border-radius: var(--r-md); padding: 12px 14px; margin: 8px 0; font-size: 12px; background: #fff8e9; }

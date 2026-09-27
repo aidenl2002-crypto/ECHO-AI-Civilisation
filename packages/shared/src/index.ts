@@ -2,6 +2,11 @@
 
 export interface Vec2 { x: number; y: number; }
 
+export interface CityRoad { id: string; name: string; kind: 'arterial' | 'main' | 'local' | 'pedestrian'; width: number; points: Vec2[]; }
+export interface CityDistrict { id: string; name: string; kind: 'downtown' | 'old_town' | 'suburb' | 'industrial' | 'civic' | 'entertainment' | 'riverside'; center: Vec2; polygon: Vec2[]; color: string; desirability: number; rentMultiplier: number; }
+export interface CityGreenSpace { id: string; name: string; kind: 'park' | 'plaza' | 'woodland'; polygon: Vec2[]; }
+export interface CityLayout { version: 2; width: number; height: number; boundary: Vec2[]; water: Vec2[][]; districts: CityDistrict[]; roads: CityRoad[]; greenSpaces: CityGreenSpace[]; }
+
 export type Sex = "M" | "F";
 
 // 18 psychology traits, normalized 0..1
@@ -54,7 +59,10 @@ export interface Building {
   capacity: number; ownerId: string | null; workers: string[];
   inventory: Record<string, number>; // item -> qty, never negative
   openingHours: { open: number; close: number }; // 0-24
-  economic: { funds: number; priceLevel: number; wagesOwed: number };
+  economic: { funds: number; priceLevel: number; wagesOwed: number; revenueToday?: number; customersToday?: number; metricDay?: number };
+  districtId?: string; address?: string; variant?: string;
+  footprint?: { width: number; depth: number }; height?: number; rotation?: number;
+  entrance?: Vec2; propertyValue?: number; rent?: number; condition?: number; desirability?: number;
 }
 
 export interface Job {

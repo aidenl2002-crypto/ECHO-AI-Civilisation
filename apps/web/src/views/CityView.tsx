@@ -5,6 +5,10 @@ import { useEcho } from '../store';
 import { api, type HeatItem } from '../api';
 import { Icon } from '../icons';
 import { Drawer, Segmented } from '../primitives';
+import { BuildingInspector } from '../map/BuildingInspector';
+import { CitizenQuickActions } from '../citizen/CitizenQuickActions';
+import { FollowLifePanel } from '../citizen/FollowLifePanel';
+import CitizenProfile from '../admin/CitizenProfile';
 
 const OVERLAYS = [
   { v: 'none', label: 'None' }, { v: 'wealth', label: 'Wealth' }, { v: 'crime', label: 'Crime', disabled: true, title: 'SYSTEM NOT IMPLEMENTED: mapped crime locations are unavailable' },
@@ -18,6 +22,7 @@ export default function CityView() {
   const [pinned, setPinned] = useState<string[]>(() => JSON.parse(localStorage.getItem('echo_pins') ?? '[]'));
   const [ov, setOv] = useState('none');
   const [showLegend, setShowLegend] = useState(false);
+  const [ownerEditor, setOwnerEditor] = useState(false);
 
   useEffect(() => { localStorage.setItem('echo_pins', JSON.stringify(pinned)); }, [pinned]);
   useEffect(() => {
@@ -39,17 +44,17 @@ export default function CityView() {
 
   return (
     <div className="map-stage">
-      <CityMap citizens={e.citizens} buildings={e.buildings} clock={e.state?.clock ?? null}
+      <CityMap citizens={e.citizens} buildings={e.buildings} layout={e.layout} clock={e.state?.clock ?? null}
         overlay={ov} heat={heat} selectedCitizenId={e.selCitizen} selectedBuildingId={e.selBuilding}
         follow={e.follow} cinematic={e.cinematic} observer={e.observer} pinned={pinned} routeTo={routeTo}
-        onSelectCitizen={e.setSelCitizen} onSelectBuilding={e.setSelBuilding} onHover={setHover} />
+        onSelectCitizen={(id) => { e.setSelCitizen(id); e.setSelBuilding(null); setOwnerEditor(false); }} onSelectBuilding={(id) => { e.setSelBuilding(id); e.setSelCitizen(null); setOwnerEditor(false); }} onHover={setHover} />
 
       <div className="map-hud tl map-title-card" style={{ maxWidth: 'min(300px, calc(100% - 36px))', boxSizing: 'border-box' }}>
         <span className="map-eyebrow">THE LIVING CITY <span className="map-live-dot" /></span>
         <strong>{e.state?.cityName || 'Project Echo'}</strong>
         <span className="map-title-sub">{e.derived.pop} people · {e.buildings.length} places <span>·</span> {e.state?.clock.season ?? ''} {String(e.state?.clock.hour ?? 0).padStart(2, '0')}:00{e.state?.paused ? ' · Paused' : ''}</span>
       </div>
-      <div className="map-hud tr map-overlay-control" style={{ top: 116, right: 16 }}>
+      <div className="map-hud tr map-overlay-control" style={{ top: 18, right: 16 }}>
         <span className="map-control-label">MAP LAYER</span>
         <Segmented value={ov} onChange={(v) => { setOv(v); e.setOverlay(v); }} options={OVERLAYS} />
         {ov !== 'none' && <span className="map-overlay-note">{ov === 'wealth' ? 'Green: more wealth · Coral: less' : ov === 'happiness' ? 'Green: happier · Coral: struggling' : 'Violet: active cognition'}</span>}
@@ -110,11 +115,14 @@ export default function CityView() {
                   <button className={e.follow ? 'active' : ''} onClick={() => e.setFollow(!e.follow)}>{e.follow ? 'Unfollow' : 'Follow'}</button>
                   <button onClick={() => togglePin(selC.id)}>{pinned.includes(selC.id) ? 'Unpin' : 'Pin'}</button>
                 </div>
+                {e.follow && <FollowLifePanel citizen={selC} />}
+                <CitizenQuickActions key={selC.id} id={selC.id} name={selC.name} alive={selC.alive} onChanged={e.refresh} onOpenEditor={() => setOwnerEditor((v) => !v)} />
+                {ownerEditor && <CitizenProfile key={selC.id} id={selC.id} push={(message) => e.push(message)} onChanged={e.refresh} />}
               </div>
             )}
             {selB && !selC && (
               <div>
-                <div className="kv"><span>type</span><b>{selB.type}</b><span>pos</span><b className="mono">{Math.round(selB.x)}, {Math.round(selB.y)}</b></div>
+                <BuildingInspector id={selB.id} />
                 <div className="row wrap" style={{ marginTop: 10 }}>
                   <button onClick={() => togglePin(selB.id)}>{pinned.includes(selB.id) ? 'Unpin' : 'Pin'}</button>
                   <button onClick={() => e.setView('business')}>Businesses</button>

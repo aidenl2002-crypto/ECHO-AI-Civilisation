@@ -5,12 +5,14 @@ export function lifeTick(state: WorldState, tick: number, day: number, rng: () =
   if (tick % 288 !== 0) { deathCheck(state, tick, day, rng, emit); return; }
   for (const c of Object.values(state.citizens)) {
     if (!c.alive) continue;
-    if (day % 365 === 1) c.age += 1;
+    if (tick > 0 && day % 365 === 1) c.age += 1;
   }
   // birth: small chance per married couple per year
   if (day % 30 === 1) {
     for (const c of Object.values(state.citizens)) {
       if (!c.alive || !c.marriedToId || c.sex !== "F" || c.age > 42 || c.age < 20) continue;
+      const home = c.homeId ? state.buildings[c.homeId] : null;
+      if (!home || Object.values(state.citizens).filter((resident) => resident.alive && resident.homeId === home.id).length >= home.capacity) continue;
       if (rng() < 0.02) {
         const id = `c_b${tick}_${c.id}`;
         state.citizens[id] = {
@@ -41,12 +43,13 @@ function deathCheck(state: WorldState, tick: number, day: number, rng: () => num
     const ageRisk = c.age > 70 ? (c.age - 70) * 0.003 : 0;
     const healthRisk = c.needs.health < 10 ? 0.03 : 0;
     if (rng() < ageRisk + healthRisk) {
-      c.alive = false; c.currentActivity = "dead"; c.tickDied = tick; c.jobId = null;
+      c.alive = false; c.currentActivity = "dead"; c.tickDied = tick; c.jobId = null; c.destinationBuildingId = null;
       if (c.workBuildingId && state.buildings[c.workBuildingId]) {
         state.buildings[c.workBuildingId].workers = state.buildings[c.workBuildingId].workers.filter((w) => w !== c.id);
       }
       // free job slot
       for (const j of Object.values(state.jobs)) if (j.workerId === c.id) j.workerId = null;
+      c.workBuildingId = null;
       emit("CitizenDied", `${c.firstName} ${c.lastName} died at ${c.age}`, [c.id], { age: c.age });
     }
   }

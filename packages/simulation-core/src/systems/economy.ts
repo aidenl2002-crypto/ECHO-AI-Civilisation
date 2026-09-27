@@ -1,15 +1,19 @@
-// economy.ts: purchases, weekly salaries, monthly rent+tax. Money conserved.
+// Purchases, daily portions of weekly salaries, and monthly rent/tax transfers.
 import type { WorldState } from "../world.js";
 import { eatMeal } from "./needs.js";
 
 export const MEAL_PRICE = 12;
 export const RENT_MONTHLY = 150;
 
-// Called once per tick for a small rotating subset (perf): each citizen eats deterministically at lunch/dinner.
+// Called every five simulated minutes; hourly payouts must run only on the first tick.
 export function economyTick(state: WorldState, tick: number, day: number, hour: number, emit: (t: string, s: string, a: string[], d: Record<string, unknown>, b?: string) => void): void {
+  const buildings = Object.values(state.buildings);
+  if (tick % 288 === 0) for (const b of buildings) {
+    b.economic.metricDay = day; b.economic.revenueToday = 0; b.economic.customersToday = 0;
+  }
   // Food purchases at meal hours: hungry citizens with cash buy from grocery/restaurant
   if (hour === 12 || hour === 19) {
-    const sellers = ["b_groc", "b_rest", "b_shop1"].filter((id) => (state.buildings[id]?.inventory.meal ?? 0) > 0);
+    const sellers = buildings.filter((b) => (b.inventory.meal ?? 0) > 0).map((b) => b.id);
     if (sellers.length > 0) {
       for (const c of Object.values(state.citizens)) {
         if (!c.alive || c.needs.hunger > 70) continue;
@@ -19,13 +23,18 @@ export function economyTick(state: WorldState, tick: number, day: number, hour: 
         let best = sellers[0], bd = Infinity;
         for (const s of sellers) {
           const b = state.buildings[s];
+          if ((b.inventory.meal ?? 0) <= 0) continue;
           const d = Math.hypot(c.position.x - b.position.x, c.position.y - b.position.y);
           if (d < bd) { bd = d; best = s; }
         }
+        if (!Number.isFinite(bd) || (state.layout && bd > 90)) continue;
         const shop = state.buildings[best];
         shop.inventory.meal = Math.max(0, (shop.inventory.meal ?? 0) - 1); // never negative
         c.financial.cash -= MEAL_PRICE;
         shop.economic.funds += MEAL_PRICE;
+        if (shop.economic.metricDay !== day) { shop.economic.metricDay = day; shop.economic.revenueToday = 0; shop.economic.customersToday = 0; }
+        shop.economic.revenueToday = (shop.economic.revenueToday ?? 0) + MEAL_PRICE;
+        shop.economic.customersToday = (shop.economic.customersToday ?? 0) + 1;
         eatMeal(c);
         emit("MealEaten", `${c.firstName} bought a meal`, [c.id], { price: MEAL_PRICE }, best);
       }
@@ -35,13 +44,13 @@ export function economyTick(state: WorldState, tick: number, day: number, hour: 
         if (c.alive && c.needs.hunger < 30) { eatMeal(c); }
       }
     }
-    // safety net: broke + starving citizens eat a free pantry meal (no one starves with food in the city)
+    // Pantry fallback also covers hungry travellers who have not reached a seller yet.
     for (const c of Object.values(state.citizens)) {
-      if (c.alive && c.needs.hunger < 35 && c.financial.cash < MEAL_PRICE) eatMeal(c);
+      if (c.alive && c.needs.hunger < 30) eatMeal(c);
     }
   }
-  // Weekly payday: first tick of Monday (day%7==1) at 9h — business pays what it can (partial, never overdrafts); shortfall tracked as wagesOwed so money is conserved.
-  if (day % 7 === 1 && hour === 9) {
+  // Daily wage slice, once at 09:00. Partial pay is recorded as wages owed.
+  if (hour === 9 && tick % 12 === 0) {
     for (const j of Object.values(state.jobs)) {
       if (!j.workerId) continue;
       const w = state.citizens[j.workerId];
@@ -56,14 +65,19 @@ export function economyTick(state: WorldState, tick: number, day: number, hour: 
     }
   }
   // Monthly rent (day%30==1, 8h) + tax to treasury
-  if (day % 30 === 1 && hour === 8) {
+  if (day % 30 === 1 && hour === 8 && tick % 12 === 0) {
+    const residents = new Map<string, number>();
+    for (const c of Object.values(state.citizens)) if (c.alive && c.homeId) residents.set(c.homeId, (residents.get(c.homeId) ?? 0) + 1);
     for (const c of Object.values(state.citizens)) {
       if (!c.alive) continue;
-      const rent = Math.min(c.financial.cash, RENT_MONTHLY);
+      const home = c.homeId ? state.buildings[c.homeId] : null;
+      const monthlyShare = home?.rent ? home.rent / Math.max(1, residents.get(home.id) ?? 1) : RENT_MONTHLY;
+      const rent = home?.ownerId === c.id ? 0 : Math.min(c.financial.cash, monthlyShare);
       c.financial.cash -= rent;
-      state.government.treasury += Math.round(rent * 0.2);
-      // rest to landlord (home owner ~ city); keep conservation: remainder to treasury too
-      state.government.treasury += rent - Math.round(rent * 0.2);
+      const landlord = home?.ownerId ? state.citizens[home.ownerId] : null;
+      if (landlord?.alive) landlord.financial.cash += rent;
+      else state.government.treasury += rent;
+      if (rent > 0) emit("RentPaid", `${c.firstName} paid ${rent.toFixed(0)} in rent`, [c.id], { amount: rent }, home?.id);
       const tax = Math.round(c.financial.cash * state.government.taxRate * 0.05);
       if (tax > 0 && c.financial.cash >= tax) {
         c.financial.cash -= tax;
@@ -73,15 +87,14 @@ export function economyTick(state: WorldState, tick: number, day: number, hour: 
     }
   }
   // Restock shops daily at 6h (goods cost business funds — conserved)
-  if (hour === 6) {
-    for (const id of ["b_groc", "b_rest", "b_shop1", "b_shop2", "b_bar"]) {
-      const b = state.buildings[id];
-      if (!b) continue;
+  if (hour === 6 && tick % 12 === 0) {
+    for (const b of buildings.filter((b) => 'meal' in b.inventory)) {
       const need = 100 - (b.inventory.meal ?? 0);
       if (need > 0) {
-        const cost = Math.min(b.economic.funds, need * 3);
+        const units = Math.max(0, Math.min(need, Math.floor(b.economic.funds / 3)));
+        const cost = units * 3;
         b.economic.funds -= cost;
-        b.inventory.meal = (b.inventory.meal ?? 0) + Math.floor(cost / 3);
+        b.inventory.meal = (b.inventory.meal ?? 0) + units;
       }
     }
   }

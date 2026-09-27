@@ -1,6 +1,6 @@
 // Global ECHO OS store: polling, selection, toasts, palette, derived metrics.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type Building, type CitizenSummary, type GameState, type Metrics, type SimEvent } from './api';
+import { api, type Building, type CitizenSummary, type CityLayout, type GameState, type Metrics, type SimEvent } from './api';
 
 export type View = 'city' | 'people' | 'business' | 'economy' | 'gov' | 'social' | 'news' | 'history' | 'data' | 'brain' | 'god';
 
@@ -10,6 +10,7 @@ interface EchoCtx {
   started: boolean; start: () => void;
   online: boolean;
   state: GameState | null; citizens: CitizenSummary[]; buildings: Building[];
+  layout: CityLayout | null;
   events: SimEvent[]; metrics: Metrics[];
   view: View; setView: (v: View) => void;
   selCitizen: string | null; setSelCitizen: (id: string | null) => void;
@@ -36,6 +37,8 @@ export function EchoProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<GameState | null>(null);
   const [citizens, setCitizens] = useState<CitizenSummary[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
+  const [layout, setLayout] = useState<CityLayout | null>(null);
+  const layoutKey = useRef<string | null>(null);
   const [events, setEvents] = useState<SimEvent[]>([]);
   const [metrics, setMetrics] = useState<Metrics[]>([]);
   const [view, setView] = useState<View>('city');
@@ -61,6 +64,12 @@ export function EchoProvider({ children }: { children: React.ReactNode }) {
     try {
       const [s, c, b] = await Promise.all([api.state(), api.citizens(), api.buildings()]);
       if (n !== tick.current) return;
+      // Geography is static within a world; avoid transferring it on each citizen poll.
+      if (layoutKey.current !== (s.worldKey ?? s.seed ?? 'legacy')) {
+        const geography = await api.layout();
+        if (n !== tick.current) return;
+        setLayout(geography); layoutKey.current = s.worldKey ?? s.seed ?? 'legacy';
+      }
       setState(s); setCitizens(c); setBuildings(b);
       setOnline(true);
     } catch { if (n === tick.current) setOnline(false); }
@@ -127,12 +136,12 @@ export function EchoProvider({ children }: { children: React.ReactNode }) {
   }, [citizens, metrics, state]);
 
   const v = useMemo<EchoCtx>(() => ({
-    started, start: () => setStarted(true), online, state, citizens, buildings, events, metrics,
+    started, start: () => setStarted(true), online, state, citizens, buildings, layout, events, metrics,
     view, setView, selCitizen, setSelCitizen, selBuilding, setSelBuilding, follow, setFollow,
     overlay, setOverlay, cinematic, setCinematic, observer, setObserver,
     toasts, push, paletteOpen, setPaletteOpen, refresh,
     setSpeed, setPaused, step, save, derived, aiOnline,
-  }), [started, online, state, citizens, buildings, events, metrics, view, selCitizen, selBuilding, follow, overlay, cinematic, observer, toasts, push, paletteOpen, refresh, setSpeed, setPaused, step, save, derived, aiOnline]);
+  }), [started, online, state, citizens, buildings, layout, events, metrics, view, selCitizen, selBuilding, follow, overlay, cinematic, observer, toasts, push, paletteOpen, refresh, setSpeed, setPaused, step, save, derived, aiOnline]);
 
   return <Ctx.Provider value={v}>{children}</Ctx.Provider>;
 }

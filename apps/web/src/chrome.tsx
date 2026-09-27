@@ -315,7 +315,7 @@ export function StartScreen() {
   const e = useEcho();
   const [seed, setSeed] = useState('echo-1');
   const [cityName, setCityName] = useState('Echo City');
-  const [pop, setPop] = useState(40);
+  const [pop, setPop] = useState(120);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async (fn: () => Promise<unknown>) => {
@@ -337,7 +337,7 @@ export function StartScreen() {
         <div className="sub">Set the scene, then see where life takes it.</div>
         <div style={{ display: 'grid', gap: 15, textAlign: 'left', marginBottom: 22 }}>
           <label>City name<input value={cityName} onChange={(x) => setCityName(x.target.value)} /></label>
-          <label>Starting population<input type="number" min={2} max={500} value={pop} onChange={(x) => setPop(Number(x.target.value))} /></label>
+          <label>Starting population<input type="number" min={5} max={1000} value={pop} onChange={(x) => setPop(Number(x.target.value))} /></label>
           <label>World seed<input value={seed} onChange={(x) => setSeed(x.target.value)} /></label>
         </div>
         <div style={{ display: 'grid', gap: 10 }}>

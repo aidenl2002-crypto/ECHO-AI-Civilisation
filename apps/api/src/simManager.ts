@@ -12,7 +12,7 @@ import { saveSlot, logThought, recordMetric } from "./db.js";
 
 const seed = Number(process.env.WORLD_SEED ?? 1337);
 const city = process.env.CITY_NAME ?? "Echo City";
-export const engine = new SimulationEngine(Number.isFinite(seed) ? seed : 1337, city, 40);
+export const engine = new SimulationEngine(Number.isFinite(seed) ? seed : 1337, city, Math.max(5, Math.min(1000, Number(process.env.START_CITIZENS ?? 120))));
 
 // Legacy local-LLM provider (kept for compat; OpenCode CLI is the primary gateway).
 export const ai = new AIProvider({

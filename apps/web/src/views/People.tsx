@@ -5,6 +5,9 @@ import { api, type CitizenDetail, type CitizenSummary } from '../api';
 import { useEcho } from '../store';
 import { Avatar, Bar, Chart, Empty, EventCard, Panel, Ring, Segmented, Sparkline } from '../primitives';
 import { Icon } from '../icons';
+import { CitizenQuickActions } from '../citizen/CitizenQuickActions';
+import { CitizenVitals } from '../citizen/CitizenVitals';
+import CitizenProfile from '../admin/CitizenProfile';
 
 type SortK = 'wealth' | 'mood' | 'health' | 'age' | 'name';
 
@@ -85,7 +88,8 @@ export default function PeopleView() {
   );
 }
 
-type CTab = 'overview' | 'mind' | 'people' | 'bio';
+type CTab = 'overview' | 'mind' | 'people' | 'career' | 'finances' | 'memories' | 'bio';
+type RawCitizen = { needs?: {energy?:number;hunger?:number}; emotions?: {stress?:number}; financial?: {cash:number;bank:number;debt:number}; homeId?:string|null;workBuildingId?:string|null;destinationBuildingId?:string|null;alive?:boolean };
 
 function CitizenDetailView({ id }: { id: string }) {
   const e = useEcho();
@@ -95,13 +99,18 @@ function CitizenDetailView({ id }: { id: string }) {
   const [q, setQ] = useState('');
   const [answer, setAnswer] = useState('');
   const [asking, setAsking] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [revision, setRevision] = useState(0);
+  const [editor, setEditor] = useState(false);
 
   useEffect(() => {
     let live = true;
-    api.citizen(id).then((x) => { if (live) setD(x); }).catch(() => { if (live) setD(null); });
+    const load = () => api.citizen(id).then((x) => { if (live) { setD(x); setLoadError(''); } }).catch(() => { if (live) setLoadError('Unable to load this citizen. Check the city connection.'); });
+    void load();
+    const timer = window.setInterval(load, 5000);
     api.mind(id).then((m) => { if (live && m) setMind(m); }).catch(() => {});
-    return () => { live = false; };
-  }, [id]);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [id, revision]);
 
   const ask = async () => {
     if (!q.trim()) return;
@@ -111,15 +120,18 @@ function CitizenDetailView({ id }: { id: string }) {
     setAsking(false);
   };
 
-  if (d === null) return <div className="dim">Loading citizen…</div>;
-  if (!d) return <div className="dim">Citizen not found (may have died or backend offline).</div>;
+  if (d === null) return <div className="panel" role="status">{loadError || 'Loading citizen…'}{loadError && <button onClick={() => setRevision(v => v+1)}>Retry</button>}</div>;
 
-  const dead = d.alive === false;
+  const raw = (d as CitizenDetail & {raw?:RawCitizen}).raw ?? {};
+  const dead = d.alive === false || raw.alive === false;
+  const place = (id?:string|null) => id ? e.buildings.find(b => b.id === id)?.name ?? id : 'Not recorded';
+  const changed = () => { setRevision(v => v+1); e.refresh(); };
   const finHist = (d.financialHistory ?? []).map((f) => f.amount);
   const moments = [...(d.events ?? [])].filter((m) => /birth|born|marri|wedding|found|arrest|elect|died|death/i.test(m.text)).slice(-4);
 
   return (
     <div>
+      {loadError && <p role="alert">{loadError} Showing the last received details.</p>}
       <div className="panel">
         <div className="row">
           <Avatar seed={d.id} name={d.name} size={56} />
@@ -133,12 +145,14 @@ function CitizenDetailView({ id }: { id: string }) {
           <div style={{ textAlign: 'center' }}><div className="mono" style={{ fontSize: 17, fontWeight: 700 }}>${Math.round(d.wealth).toLocaleString()}</div><div className="faint" style={{ fontSize: 10 }}>WEALTH</div></div>
         </div>
         <div className="row wrap" style={{ marginTop: 10 }}>
-          <button className={e.follow && e.selCitizen === id ? 'active' : ''} onClick={() => { e.setSelCitizen(id); e.setFollow(!e.follow); }}>
+          <button className={e.follow && e.selCitizen === id ? 'active' : ''} onClick={() => { const followingThis = e.follow && e.selCitizen === id; e.setSelCitizen(id); e.setFollow(!followingThis); }}>
             <Icon name="eye" size={13} /> {e.follow && e.selCitizen === id ? 'Following' : 'Follow'}
           </button>
           <button onClick={() => { e.setSelCitizen(id); e.setView('city'); }}>Locate on map</button>
           <button onClick={() => setTab('mind')}>Open mind</button>
         </div>
+        <CitizenQuickActions key={id} id={id} name={d.name} alive={!dead} onChanged={changed} onOpenEditor={() => setEditor(v => !v)} />
+        {editor && <CitizenProfile id={id} push={text => e.push(text)} onChanged={changed} />}
       </div>
 
       {dead && (
@@ -154,9 +168,9 @@ function CitizenDetailView({ id }: { id: string }) {
         </div>
       )}
 
-      <div className="tabs" style={{ marginTop: 12 }}>
-        {(['overview', 'mind', 'people', 'bio'] as CTab[]).map((t) => (
-          <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t === 'people' ? 'Relationships' : t[0].toUpperCase() + t.slice(1)}</button>
+      <div className="tabs citizen-tabs" style={{ marginTop: 12 }}>
+        {(['overview', 'mind', 'people', 'career', 'finances', 'memories', 'bio'] as CTab[]).map((t) => (
+          <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t === 'people' ? 'Relationships' : t === 'overview' ? 'Life' : t === 'bio' ? 'History' : t[0].toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
 
@@ -164,9 +178,7 @@ function CitizenDetailView({ id }: { id: string }) {
         <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
           <div className="grid2">
             <Panel title="Vitals" icon="heart">
-              <Bar label="health" value={d.health} color="#87a794" />
-              <Bar label="mood" value={d.mood} color={d.mood > 60 ? '#258b80' : d.mood > 30 ? '#c89a51' : '#b86351'} />
-              <Bar label="wealth" value={Math.min(100, d.wealth / 300)} color="#c89a51" />
+              <CitizenVitals health={d.health} happiness={d.mood} energy={raw.needs?.energy} hunger={raw.needs?.hunger} stress={raw.emotions?.stress == null ? undefined : raw.emotions.stress * 100} />
             </Panel>
             <Panel title="Wealth trajectory" icon="chart">
               {finHist.length > 1 ? <Sparkline data={finHist.slice(-40)} width={220} height={54} color="#c89a51" /> : <div className="faint">No financial history yet.</div>}
@@ -180,9 +192,8 @@ function CitizenDetailView({ id }: { id: string }) {
               <ul style={{ margin: 0, paddingLeft: 16 }}>{(d.goals ?? []).map((g, i) => <li key={i}>{g}</li>)}</ul>
             </Panel>
             <Panel title="Household" icon="city">
-              {(d.family ?? []).filter((f) => /spouse|child|parent|sibling|partner/i.test(f.relation)).length === 0 && <div className="faint">Lives alone (no recorded household).</div>}
-              <ul style={{ margin: 0, paddingLeft: 16 }}>{(d.family ?? []).filter((f) => /spouse|child|parent|sibling|partner/i.test(f.relation)).map((f) => (
-                <li key={f.id}>{f.name} — {f.relation}</li>))}</ul>
+              <div className="dim" style={{marginBottom:10}}>Residents sharing this address</div>
+              {raw.homeId ? e.citizens.filter(c => c.homeId === raw.homeId && c.alive !== false).map(c => <div className="kv" key={c.id}><button disabled={c.id === d.id} onClick={() => e.setSelCitizen(c.id)}>{c.name}</button><span>{c.id === d.id ? 'This citizen' : 'Co-resident'}</span></div>) : <div className="faint">No home address recorded.</div>}
               <div className="kv" style={{ marginTop: 6 }}><span>home</span><b>{d.home ?? '—'}</b></div>
             </Panel>
           </div>
@@ -197,10 +208,15 @@ function CitizenDetailView({ id }: { id: string }) {
         <MindView d={d} mind={mind} q={q} setQ={setQ} answer={answer} ask={ask} asking={asking} />
       )}
 
+      {tab === 'career' && <div style={{marginTop:10,display:'grid',gap:10}}><Panel title="Working life" icon="shop"><div className="citizen-facts"><div><span>Occupation</span><strong>{jobLabel(d.job)}</strong></div><div><span>Workplace</span><strong>{place(raw.workBuildingId)}</strong></div><div><span>Current activity</span><strong>{d.activity ?? 'Not recorded'}</strong></div><div><span>Destination</span><strong>{place(raw.destinationBuildingId)}</strong></div></div></Panel><Panel title="Skills" icon="zap">{Object.entries(d.skills ?? {}).map(([key,value]) => <Bar key={key} label={key} value={value} color="#8ba486" />)}</Panel><Panel title="Employment record" icon="clock">{(d.employmentHistory ?? []).length ? d.employmentHistory!.map((entry,i) => <EventCard key={i} day={entry.day} text={entry.job} type="work" />) : <p className="dim">No employment changes recorded.</p>}</Panel></div>}
+      {tab === 'finances' && <div style={{marginTop:10,display:'grid',gap:10}}><Panel title="Personal finances" icon="chart"><div className="citizen-facts">{[['Total assets',d.wealth],['Cash',raw.financial?.cash],['Bank balance',raw.financial?.bank],['Debt',raw.financial?.debt]].map(([label,value]) => <div key={String(label)}><span>{label}</span><strong>{typeof value === 'number' ? `$${value.toLocaleString(undefined,{maximumFractionDigits:0})}` : 'Not recorded'}</strong></div>)}</div></Panel><Panel title="Recorded balances" icon="clock">{(d.financialHistory ?? []).map((entry,i) => <div className="kv" key={i}><span>Day {entry.day} · {entry.note}</span><b>${Math.round(entry.amount).toLocaleString()}</b></div>)}{!d.financialHistory?.length && <p className="dim">No balance history recorded.</p>}</Panel></div>}
+      {tab === 'memories' && <div style={{marginTop:10}}><Panel title="Remembered moments" icon="book">{[...(d.memories ?? [])].sort((a,b) => b.day-a.day).map((memory,i) => <EventCard key={i} day={memory.day} text={memory.text} type="memory" />)}{!d.memories?.length && <p className="dim">No memories recorded yet.</p>}</Panel></div>}
+
       {tab === 'people' && (
         <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
           <Panel title="Relationship graph" icon="users">
             <RelGraph d={d} />
+            {(d.relationships ?? []).map(r => <div className="kv" key={r.id}><button onClick={() => e.setSelCitizen(r.id)}>{r.name}</button><span>{r.type ?? 'Connection'} · trust {Math.round(r.trust == null ? r.score : r.trust * 100)}{r.affection == null ? '' : ` · affection ${Math.round(r.affection * 100)}`}</span></div>)}
           </Panel>
           <Panel title="Family tree" icon="city">
             {(d.family ?? []).length === 0 && <div className="faint">No recorded family. Every legend starts somewhere.</div>}
@@ -241,19 +257,19 @@ function MindView({ d, mind, q, setQ, answer, ask, asking }: {
   const arr = (v: unknown): string[] => Array.isArray(v) ? v.map(String) : typeof v === 'string' ? [v] : [];
   return (
     <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-      <Panel title="Thought summaries (never chain-of-thought)" icon="brain">
-        {(d.memories ?? []).slice(-4).reverse().map((x, i) => <div key={i} className="feed-item">💭 <span className="mono faint">D{x.day}</span> {x.text}</div>)}
+      <Panel title="Remembered thoughts & experiences" icon="brain">
+        {[...(d.memories ?? [])].sort((a,b) => b.day-a.day).slice(0,4).map((x, i) => <div key={i} className="feed-item">💭 <span className="mono faint">D{x.day}</span> {x.text}</div>)}
         {(d.memories ?? []).length === 0 && <div className="faint">No recorded thoughts yet.</div>}
         {mind == null && <div className="faint">Cognition layer offline — showing lived memory only.</div>}
       </Panel>
       <div className="grid2">
         <Panel title="Concerns" icon="flame">
           {arr(m.concerns ?? (d as { concerns?: string[] }).concerns).map((c, i) => <div key={i} className="ev-card" style={{ borderLeftColor: '#b86351' }}>{c}</div>)}
-          {arr(m.concerns).length === 0 && <div className="faint">No recorded concerns.</div>}
+          {arr(m.concerns ?? d.concerns).length === 0 && <div className="faint">No recorded concerns.</div>}
         </Panel>
         <Panel title="Beliefs" icon="scale">
           {arr(m.beliefs ?? (d as { beliefs?: string[] }).beliefs).map((c, i) => <div key={i} className="ev-card" style={{ borderLeftColor: '#ad7b8a' }}>{c}</div>)}
-          {arr(m.beliefs).length === 0 && <div className="faint">No recorded beliefs.</div>}
+          {arr(m.beliefs ?? d.beliefs).length === 0 && <div className="faint">No recorded beliefs.</div>}
         </Panel>
       </div>
       <Panel title="Plans & goals" icon="eye">
@@ -341,7 +357,7 @@ function BioArchive({ d }: { d: CitizenDetail }) {
   })();
   return (
     <div className="tl-rail">
-      <div className="tl-node"><b>Born into Echo City.</b><div className="faint">Every citizen arrives with nothing but a name.</div></div>
+      <div className="tl-node"><b>{d.name}'s recorded life</b><div className="faint">Events and memories preserved by the city.</div></div>
       {chapters.map(([day, lines]) => (
         <div key={day} className="tl-node">
           <span className="chip mono">DAY {day}</span>

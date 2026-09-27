@@ -1,11 +1,12 @@
 // WorldState + world generation (deterministic from seed).
-import { Building, Citizen, EchoPost, Goal, Job, MemoryEntry, Relationship, SimEvent, relKey, clamp01 } from "@echo/shared";
+import { Building, CityLayout, Citizen, EchoPost, Goal, Job, MemoryEntry, Relationship, SimEvent, relKey, clamp01 } from "@echo/shared";
 import { Rng } from "./rng.js";
+import { generateCity } from "./urban.js";
 
 export interface Government { mayorId: string | null; taxRate: number; treasury: number; }
 export interface WorldMetrics { day: number; population: number; totalWealth: number; businesses: number; avgHappiness: number; avgHealth: number; employmentRate: number; moneySupply: number; }
 export interface WorldState {
-  seed: number; cityName: string;
+  seed: number; cityName: string; layout?: CityLayout;
   citizens: Record<string, Citizen>;
   buildings: Record<string, Building>;
   jobs: Record<string, Job>;
@@ -33,34 +34,14 @@ function skills(rng: Rng): Citizen["skills"] {
   return { farming: r(), cooking: r(), medicine: r(), engineering: r(), trading: r(), leadership: r(), combat: r(), teaching: r(), crafting: r(), mining: r(), fishing: r(), building: r(), music: r(), science: r() };
 }
 
-export function createWorld(seed: number, cityName: string, citizenCount = 40): WorldState {
+export function createWorld(seed: number, cityName: string, citizenCount = 120): WorldState {
   const rng = new Rng(seed);
   const citizens: Record<string, Citizen> = {};
-  const buildings: Record<string, Building> = {};
+  const { buildings, layout } = generateCity(seed);
   const jobs: Record<string, Job> = {};
   const relationships: Record<string, Relationship> = {};
 
-  // --- buildings ---
-  const mk = (id: string, name: string, type: Building["type"], cap: number, inv: Record<string, number> = {}, funds = 5000): Building => ({
-    id, name, type, position: { x: Math.round(rng.range(50, 950)), y: Math.round(rng.range(50, 950)) },
-    capacity: cap, ownerId: null, workers: [], inventory: { ...inv }, openingHours: { open: 6, close: 22 }, economic: { funds, priceLevel: 1, wagesOwed: 0 },
-  });
-  const fixed: Array<[string, string, Building["type"], number, Record<string, number>]> = [
-    ["b_townhall", "Town Hall", "town_hall", 50, {}],
-    ["b_police", "Police Station", "police", 10, {}],
-    ["b_clinic", "Clinic", "clinic", 15, { medicine: 40 }],
-    ["b_bar", "Neon Bar", "bar", 30, { meal: 60, drink: 100 }],
-    ["b_rest", "Grand Restaurant", "restaurant", 30, { meal: 80 }],
-    ["b_groc", "Grocery", "grocery", 25, { meal: 150, groceries: 200 }],
-    ["b_fact", "Factory", "factory", 20, { goods: 100 }],
-    ["b_bank", "City Bank", "bank", 20, {}],
-    ["b_school", "School", "school", 40, {}],
-    ["b_park", "Central Park", "park", 200, {}],
-    ["b_shop1", "General Shop", "shop", 15, { goods: 80, meal: 30 }],
-    ["b_shop2", "Market Stall", "shop", 12, { goods: 60, groceries: 60 }],
-  ];
-  for (const [id, name, type, cap, inv] of fixed) buildings[id] = mk(id, name, type, cap, inv);
-  for (let i = 0; i < 8; i++) buildings[`b_home${i}`] = mk(`b_home${i}`, `Home ${i + 1}`, "home", 6, {}, 0);
+  const homes = Object.values(buildings).filter(b => b.type === "home");
 
   // --- citizens ---
   const ids: string[] = [];
@@ -69,13 +50,16 @@ export function createWorld(seed: number, cityName: string, citizenCount = 40): 
     const fn = sex === "M" ? rng.pick(FIRST_M) : rng.pick(FIRST_F);
     const id = `c_${i.toString().padStart(3, "0")}`;
     const age = rng.int(18, 70);
-    const homeIdx = i % 8;
+    const preferredHome = homes[i % homes.length];
+    const occupancy = (id: string) => Object.values(citizens).filter(c => c.homeId === id).length;
+    const home = occupancy(preferredHome.id) < preferredHome.capacity ? preferredHome : homes.find(h => occupancy(h.id) < h.capacity) ?? preferredHome;
+    if (occupancy(home.id) >= home.capacity) home.capacity = occupancy(home.id) + 1;
     const cash = Math.round(rng.range(500, 5000));
     const bank = Math.round(rng.range(0, 3000));
     citizens[id] = {
       id, firstName: fn, lastName: rng.pick(LAST), sex, age, alive: true,
-      position: { ...buildings[`b_home${homeIdx}`].position },
-      homeId: `b_home${homeIdx}`, workBuildingId: null, jobId: null, destinationBuildingId: null,
+      position: { ...home.position },
+      homeId: home.id, workBuildingId: null, jobId: null, destinationBuildingId: null,
       currentActivity: "idle",
       physical: { height: Math.round(rng.range(155, 195)), health: Math.round(rng.range(60, 100)) },
       psychology: traits(rng), skills: skills(rng),
@@ -87,22 +71,21 @@ export function createWorld(seed: number, cityName: string, citizenCount = 40): 
     ids.push(id);
   }
 
-  // --- businesses + jobs (8) ---
-  const bizB = ["b_bar", "b_rest", "b_groc", "b_fact", "b_shop1", "b_shop2", "b_clinic", "b_bank"];
-  const titles: Array<[string, keyof Citizen["skills"] | null, number]> = [
-    ["Bartender", "sociability" as unknown as keyof Citizen["skills"], 140], ["Chef", "cooking", 165],
-    ["Grocer", "trading", 130], ["Factory Worker", "engineering", 150], ["Shopkeeper", "trading", 135],
-    ["Vendor", "trading", 120], ["Nurse", "medicine", 190], ["Clerk", "trading", 155],
-  ];
-  bizB.forEach((b, i) => {
-    const [title, skill, salary] = titles[i];
-    const jid = `j_${i}`;
-    jobs[jid] = { id: jid, title, buildingId: b, salary, workerId: null, skillRequired: skill };
-  });
+  // Every commercial and civic property offers real work.
+  const bizB = Object.values(buildings).filter(b => b.type !== 'home' && b.type !== 'park').map(b => b.id);
+  const roles: Partial<Record<Building['type'], [string, keyof Citizen['skills'], number]>> = {
+    bar:['Bartender','trading',140], restaurant:['Chef','cooking',165], grocery:['Grocer','trading',130],
+    factory:['Factory Worker','engineering',150], warehouse:['Warehouse Worker','crafting',145],
+    shop:['Shopkeeper','trading',135], clinic:['Nurse','medicine',190], bank:['Clerk','trading',155],
+    school:['Teacher','teaching',180], police:['Police Officer','combat',180],town_hall:['City Clerk','leadership',170]
+  };
+  bizB.forEach((id,i) => {const [title,skill,salary]=roles[buildings[id].type] ?? ['City Worker','crafting',140]; const jid='j_'+i;
+    jobs[jid]={id:jid,title,buildingId:id,salary,workerId:null,skillRequired:skill};});
 
   // assign ~70% employment
-  const shuffled = [...ids].sort(() => rng.next() - 0.5);
-  const jobIds = Object.keys(jobs);
+  const shuffle = <T>(items: T[]): T[] => { for (let i=items.length-1;i>0;i--) {const j=rng.int(0,i);[items[i],items[j]]=[items[j],items[i]];} return items; };
+  const shuffled = shuffle([...ids]);
+  const jobIds = shuffle(Object.keys(jobs));
   // allow multiple workers per building: create extra job slots
   let ji = 0;
   const employedTarget = Math.floor(ids.length * 0.7);
@@ -157,7 +140,7 @@ export function createWorld(seed: number, cityName: string, citizenCount = 40): 
   for (const b of Object.values(buildings)) ms += b.economic.funds;
 
   return {
-    seed, cityName, citizens, buildings, jobs, relationships,
+    seed, cityName, layout, citizens, buildings, jobs, relationships,
     memories: [], events: [], posts: [], goals: {},
     government: { mayorId: ids[0], taxRate: 0.1, treasury: 10000 },
     moneySupply: ms + 10000, metricsHistory: [], eventSeq: 0,
